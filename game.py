@@ -1,128 +1,134 @@
 import streamlit as st
 import time
 import random
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
-# 스트림릿 페이지 기본 설정
+# 스트림릿 기본 설정
 st.set_page_config(page_title="Falling Blocks Game", layout="wide")
 
-# 세션 상태 초기화
-if 'player_x' not in st.session_state:
-    st.session_state.player_x = 250
-    st.session_state.score = 0
-    st.session_state.best_score = 0
-    st.session_state.obstacles = []
-    st.session_state.last_spawn_time = time.time()
-    st.session_state.game_over = False
-    st.session_state.game_start_time = time.time()
-
-# 화면 크기
+# 화면 설정
 CANVAS_WIDTH = 500
 CANVAS_HEIGHT = 600
 PLAYER_WIDTH = 50
 PLAYER_HEIGHT = 20
 OBSTACLE_SIZE = 30
-PLAYER_Y = CANVAS_HEIGHT - PLAYER_HEIGHT - 10
+PLAYER_Y = 10  # 바닥에 고정
 
-# 속도 증가 변수
-def get_speed(elapsed_time):
-    return min(8, 2 + elapsed_time / 10)
+# 세션 상태 초기화
+if "player_x" not in st.session_state:
+    st.session_state.player_x = CANVAS_WIDTH // 2
+    st.session_state.score = 0
+    st.session_state.best_score = 0
+    st.session_state.obstacles = []
+    st.session_state.game_over = False
+    st.session_state.start_time = time.time()
+    st.session_state.last_spawn_time = time.time()
 
-# 장애물 생성 주기 조절
-def get_spawn_interval(elapsed_time):
-    return max(0.3, 1.2 - elapsed_time / 30)
-
-# 게임 초기화
+# 게임 재시작
 def reset_game():
-    st.session_state.player_x = 250
+    st.session_state.player_x = CANVAS_WIDTH // 2
     st.session_state.score = 0
     st.session_state.obstacles = []
-    st.session_state.last_spawn_time = time.time()
     st.session_state.game_over = False
-    st.session_state.game_start_time = time.time()
+    st.session_state.start_time = time.time()
+    st.session_state.last_spawn_time = time.time()
 
-# UI: 점수
+# 버튼으로 캐릭터 이동
+col1, col2, col3 = st.columns([1, 1, 1])
+with col1:
+    if st.button("⬅️ 왼쪽"):
+        st.session_state.player_x = max(0, st.session_state.player_x - 30)
+with col3:
+    if st.button("➡️ 오른쪽"):
+        st.session_state.player_x = min(CANVAS_WIDTH - PLAYER_WIDTH, st.session_state.player_x + 30)
+
+# 점수 표시
 st.sidebar.title("점수판")
-st.sidebar.markdown(f"**현재 점수:** {int(st.session_state.score)}")
-st.sidebar.markdown(f"**최고 점수:** {int(st.session_state.best_score)}")
+st.sidebar.write(f"현재 점수: **{int(st.session_state.score)}**")
+st.sidebar.write(f"최고 점수: **{int(st.session_state.best_score)}**")
 
-# 게임 재시작 버튼
+# 게임 오버 후 재시작 버튼
 if st.session_state.game_over:
     if st.button("🔁 게임 다시 시작"):
         reset_game()
 
-# 키 입력
-col1, col2, col3 = st.columns([1, 1, 1])
-with col1:
-    if st.button("⬅️ 왼쪽"):
-        st.session_state.player_x -= 20
-        if st.session_state.player_x < 0:
-            st.session_state.player_x = 0
-with col3:
-    if st.button("➡️ 오른쪽"):
-        st.session_state.player_x += 20
-        if st.session_state.player_x > CANVAS_WIDTH - PLAYER_WIDTH:
-            st.session_state.player_x = CANVAS_WIDTH - PLAYER_WIDTH
+# 게임 진행 화면
+placeholder = st.empty()
 
-# 시간 기반 점수 업데이트
-if not st.session_state.game_over:
-    elapsed = time.time() - st.session_state.game_start_time
+# 장애물 생성 주기, 속도 계산
+def get_spawn_interval(elapsed_time):
+    return max(0.3, 1.2 - elapsed_time / 30)
+
+def get_speed(elapsed_time):
+    # 위에서 바닥까지 1초 내 도달하도록
+    return CANVAS_HEIGHT / 100
+
+# 장애물 추가
+def spawn_obstacle():
+    st.session_state.obstacles.append({
+        "x": random.randint(0, CANVAS_WIDTH - OBSTACLE_SIZE),
+        "y": CANVAS_HEIGHT,
+        "spawn_time": time.time()
+    })
+
+# 메인 루프 (Streamlit 반복 갱신)
+while not st.session_state.game_over:
+    elapsed = time.time() - st.session_state.start_time
     st.session_state.score = elapsed * 100
 
-# 장애물 업데이트
-current_time = time.time()
-if not st.session_state.game_over:
-    # 장애물 생성
-    if current_time - st.session_state.last_spawn_time > get_spawn_interval(elapsed):
-        st.session_state.last_spawn_time = current_time
-        st.session_state.obstacles.append([random.randint(0, CANVAS_WIDTH - OBSTACLE_SIZE), 0])
+    # 장애물 생성 타이밍
+    if time.time() - st.session_state.last_spawn_time > get_spawn_interval(elapsed):
+        spawn_obstacle()
+        st.session_state.last_spawn_time = time.time()
 
-    # 장애물 이동
+    # 장애물 위치 업데이트
+    speed = get_speed(elapsed)
     new_obstacles = []
     for obs in st.session_state.obstacles:
-        obs[1] += get_speed(elapsed) * 5
+        fall_time = time.time() - obs["spawn_time"]
+        obs["y"] = CANVAS_HEIGHT - fall_time * speed * 100
+
         # 충돌 판정
         if (
-            PLAYER_Y < obs[1] + OBSTACLE_SIZE and
-            obs[1] < PLAYER_Y + PLAYER_HEIGHT and
-            st.session_state.player_x < obs[0] + OBSTACLE_SIZE and
-            obs[0] < st.session_state.player_x + PLAYER_WIDTH
+            PLAYER_Y < obs["y"] + OBSTACLE_SIZE and
+            obs["y"] < PLAYER_Y + PLAYER_HEIGHT and
+            st.session_state.player_x < obs["x"] + OBSTACLE_SIZE and
+            obs["x"] < st.session_state.player_x + PLAYER_WIDTH
         ):
             st.session_state.game_over = True
             st.session_state.best_score = max(st.session_state.best_score, st.session_state.score)
             break
-        if obs[1] < CANVAS_HEIGHT:
+
+        if obs["y"] > -OBSTACLE_SIZE:
             new_obstacles.append(obs)
+
     st.session_state.obstacles = new_obstacles
 
-# 캔버스에 그리기
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+    # 그림 그리기
+    fig, ax = plt.subplots(figsize=(5, 6))
+    ax.set_xlim(0, CANVAS_WIDTH)
+    ax.set_ylim(0, CANVAS_HEIGHT)
+    ax.axis("off")
 
-fig, ax = plt.subplots(figsize=(5, 6))
-ax.set_xlim(0, CANVAS_WIDTH)
-ax.set_ylim(0, CANVAS_HEIGHT)
-ax.axis('off')
-
-# 플레이어
-player_rect = patches.Rectangle(
-    (st.session_state.player_x, PLAYER_Y),
-    PLAYER_WIDTH, PLAYER_HEIGHT,
-    linewidth=1, edgecolor='black', facecolor='blue'
-)
-ax.add_patch(player_rect)
-
-# 장애물
-for obs in st.session_state.obstacles:
-    rect = patches.Rectangle(
-        (obs[0], obs[1]),
-        OBSTACLE_SIZE, OBSTACLE_SIZE,
-        linewidth=1, edgecolor='black', facecolor='red'
+    # 캐릭터
+    player_rect = patches.Rectangle(
+        (st.session_state.player_x, PLAYER_Y),
+        PLAYER_WIDTH, PLAYER_HEIGHT,
+        linewidth=1, edgecolor='black', facecolor='blue'
     )
-    ax.add_patch(rect)
+    ax.add_patch(player_rect)
 
-st.pyplot(fig)
-st.markdown("---")
+    # 장애물
+    for obs in st.session_state.obstacles:
+        rect = patches.Rectangle(
+            (obs["x"], obs["y"]),
+            OBSTACLE_SIZE, OBSTACLE_SIZE,
+            linewidth=1, edgecolor='black', facecolor='red'
+        )
+        ax.add_patch(rect)
 
-# 게임 종료 메시지
-if st.session_state.game_over:
-    st.error(f"💥 게임 오버! 최종 점수: {int(st.session_state.score)}")
+    placeholder.pyplot(fig)
+
+    # 짧은 시간 대기 후 반복
+    time.sleep(0.03)
